@@ -1,0 +1,2 @@
+WIFI:T:WPA2-EAP;S:LAB-ENTERPRISE;E:PEAP;A:;I:;PH2:MSCHAPV2;H:false;U:testuser;P:testpass123;;
+

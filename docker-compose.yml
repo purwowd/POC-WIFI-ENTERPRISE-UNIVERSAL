@@ -1,0 +1,64 @@
+services:
+  radius:
+    build: ./radius
+    container_name: poc-wifi-radius
+    networks:
+      wlanlab:
+        ipv4_address: 10.88.0.10
+    volumes:
+      - ./radius/conf:/lab-conf:ro
+      - ./radius/certs:/certs
+      - ./evidence:/evidence
+    environment:
+      - RADIUS_CLIENT_SECRET=labsecret
+      - RADIUS_EAP_DEFAULT=peap
+    command: ["/entrypoint.sh"]
+    restart: unless-stopped
+
+  ap:
+    build: ./ap
+    container_name: poc-wifi-ap
+    network_mode: host
+    privileged: true
+    depends_on:
+      - radius
+    volumes:
+      - ./configs/hostapd.conf:/etc/hostapd/hostapd.conf:ro
+      - ./evidence:/evidence
+    environment:
+      - RADIUS_ADDR=10.88.0.10
+      - RADIUS_SECRET=labsecret
+    command: ["/run-hostapd.sh"]
+    restart: unless-stopped
+
+  victim:
+    build: ./victim
+    container_name: poc-wifi-victim
+    networks:
+      wlanlab:
+        ipv4_address: 10.88.0.20
+    depends_on:
+      - radius
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./radius/certs:/certs:ro
+      - ./evidence:/evidence
+    environment:
+      - WIFI_SSID=LAB-ENTERPRISE
+      - WIFI_USER=testuser
+      - WIFI_PASS=testpass123
+      - EAP_METHOD=PEAP
+      - PHASE2=auth=MSCHAPV2
+      - CA_CERT=/certs/ca.crt
+    command: ["/run-victim.sh"]
+    restart: "no"
+
+networks:
+  wlanlab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.88.0.0/24
+          gateway: 10.88.0.1
+

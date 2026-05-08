@@ -1,0 +1,13 @@
+authorize {
+	filter_username
+	preprocess
+	chap
+	mschap
+	digest
+	suffix
+	eap {
+		ok = return
+	}
+	files
+}
+
