@@ -1,0 +1,3 @@
+[victim] wpa_supplicant config written to /tmp/wpa.conf
+[victim] Dry-run parse check for wpa_supplicant config...
+[victim] Done. Inspect /evidence/*.log

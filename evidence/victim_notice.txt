@@ -1,0 +1,1 @@
+[victim] NOTE: This victim is a wired container; it validates RADIUS/EAP config only.
