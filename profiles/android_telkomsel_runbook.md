@@ -87,6 +87,15 @@ with identity counts and EAP findings per profile. It writes
 `evidence/sweep-summary.json` after each profile and keeps AP/RADIUS running
 with `telkomsel-optimized` at the end unless `--stop-after-sweep` is set.
 
+Analyze the captured evidence:
+
+```bash
+python3 poc.py --mode analyze-evidence \
+  --input evidence/sweep-summary.json \
+  --output evidence/analysis.json \
+  --report evidence/analysis-report.md
+```
+
 The runner also stores AP/RADIUS logs and reports detected EAP-SIM identity
 material in JSON:
 

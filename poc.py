@@ -316,6 +316,118 @@ def detect_station_macs_from_evidence(evidence_paths: list[str]) -> list[str]:
     return sorted(macs)
 
 
+def identity_to_imsi(identity: str) -> str | None:
+    local = identity.split("@", 1)[0]
+    if local.isdigit() and len(local) == 16 and local.startswith("1"):
+        return local[1:]
+    if local.isdigit() and len(local) == 15 and local.startswith("51010"):
+        return local
+    return None
+
+
+def load_text_evidence(data: dict) -> str:
+    chunks = [json.dumps(data, sort_keys=True)]
+    evidence_paths = set(data.get("evidence", []))
+    for item in data.get("sweep_results", []):
+        evidence_paths.update(item.get("evidence", []))
+
+    for evidence_path in sorted(evidence_paths):
+        path = POC_ROOT / evidence_path
+        if path.suffix.lower() not in {".log", ".json", ".txt", ".md"}:
+            continue
+        if not path.exists():
+            continue
+        try:
+            chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    return "\n".join(chunks)
+
+
+def analyze_evidence(args: argparse.Namespace) -> dict:
+    input_path = args.input
+    if input_path is None:
+        input_path = EVIDENCE_DIR / "sweep-summary.json"
+    if not input_path.is_absolute():
+        input_path = POC_ROOT / input_path
+
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    text = load_text_evidence(data)
+    identities = detect_identities(text, redact=False)
+    station_macs = detect_station_macs(text)
+    eap_findings = detect_eap_findings(text)
+
+    imsis = sorted(
+        {imsi for identity in identities if (imsi := identity_to_imsi(identity.value))}
+    )
+    trigger_profiles = []
+    negative_hits = []
+    for item in data.get("sweep_results", []):
+        profile = item.get("profile", "<unknown>")
+        identity_count = int(item.get("identity_count") or 0)
+        expected = bool(item.get("expected_identity"))
+        has_identity = identity_count > 0 or bool(item.get("identities"))
+        if has_identity and expected:
+            trigger_profiles.append(profile)
+        if has_identity and not expected:
+            negative_hits.append(profile)
+
+    analysis = {
+        "input": str(input_path.relative_to(POC_ROOT)),
+        "imsis": imsis,
+        "identities": [asdict(identity) for identity in identities],
+        "station_macs": station_macs,
+        "trigger_profiles": sorted(set(trigger_profiles)),
+        "negative_control_hits": sorted(set(negative_hits)),
+        "eap_finding_kinds": sorted({finding.kind for finding in eap_findings}),
+        "evidence": data.get("evidence", []),
+        "conclusion": (
+            "Permanent EAP-SIM identity observed from matching HS2.0 metadata."
+            if imsis
+            else "No permanent Telkomsel IMSI found in parsed evidence."
+        ),
+    }
+
+    report_path = args.report
+    if report_path is None:
+        report_path = EVIDENCE_DIR / "analysis-report.md"
+    if not report_path.is_absolute():
+        report_path = POC_ROOT / report_path
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_analysis_report(analysis) + "\n", encoding="utf-8")
+    analysis["report"] = str(report_path.relative_to(POC_ROOT))
+    return analysis
+
+
+def render_analysis_report(analysis: dict) -> str:
+    identities = analysis.get("identities", [])
+    lines = [
+        "# Telkomsel HS2.0/EAP-SIM Evidence Analysis",
+        "",
+        f"- Input: `{analysis['input']}`",
+        f"- Conclusion: {analysis['conclusion']}",
+        f"- IMSI(s): {', '.join(analysis['imsis']) if analysis['imsis'] else 'none'}",
+        f"- Trigger profiles: {', '.join(analysis['trigger_profiles']) or 'none'}",
+        f"- Negative-control hits: {', '.join(analysis['negative_control_hits']) or 'none'}",
+        f"- EAP findings: {', '.join(analysis['eap_finding_kinds']) or 'none'}",
+        f"- Candidate station MACs: {', '.join(analysis['station_macs']) or 'none'}",
+        "",
+        "## Identities",
+        "",
+    ]
+    if identities:
+        for identity in identities:
+            lines.append(
+                f"- `{identity['value']}` ({identity['kind']}): {identity['detail']}"
+            )
+    else:
+        lines.append("- No identity values found.")
+    lines.extend(["", "## Evidence", ""])
+    for evidence in analysis.get("evidence", []):
+        lines.append(f"- `{evidence}`")
+    return "\n".join(lines)
+
+
 def check_environment(interface: str) -> PocResult:
     result = PocResult(mode="check")
     conf = read_hostapd_conf()
@@ -660,6 +772,7 @@ def parse_args() -> argparse.Namespace:
             "full",
             "sim-only-probe",
             "sweep",
+            "analyze-evidence",
             "stop",
             "provision-android",
         ],
@@ -703,6 +816,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sudo", action="store_true", help="Run tcpdump through sudo.")
     parser.add_argument("--down", action="store_true", help="Use docker compose down in stop mode.")
     parser.add_argument("--output", type=Path, default=None, help="Write JSON result to this file.")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Input JSON for --mode analyze-evidence. Default: evidence/sweep-summary.json.",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Markdown report path for --mode analyze-evidence. Default: evidence/analysis-report.md.",
+    )
     parser.add_argument("--confirm-real-phone-lab", action="store_true", help="Confirm the client is your lab phone/SIM.")
     parser.add_argument("--confirm-rf-lab", action="store_true", help="Confirm RF transmission is in your authorized lab setup.")
     parser.add_argument(
@@ -716,6 +841,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     require_confirmations(args)
+
+    if args.mode == "analyze-evidence":
+        analysis = analyze_evidence(args)
+        output = json.dumps(analysis, indent=2, sort_keys=True)
+        print(output)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(output + "\n", encoding="utf-8")
+        return 0 if analysis.get("imsis") else 1
 
     result = check_environment(args.interface)
     result.mode = args.mode

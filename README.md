@@ -227,6 +227,17 @@ Output utama:
 - `evidence/sweep-summary.json`: summary yang juga ditulis oleh runner.
 - `sweep_results[]`: per-profile identity count, EAP findings, dan evidence path.
 
+Analisis IMSI/identity dari evidence:
+
+```bash
+python3 poc.py --mode analyze-evidence \
+  --input evidence/sweep-summary.json \
+  --output evidence/analysis.json \
+  --report evidence/analysis-report.md
+```
+
+Output akan menampilkan `imsis`, `identities`, `station_macs`, trigger profile, negative-control hit, dan path report.
+
 Catatan: sweep sekarang menulis `sweep-summary.json` setelah setiap profile dan **membiarkan AP/RADIUS tetap running** dengan `--final-hs20-profile telkomsel-optimized` secara default. Kalau ingin stop setelah sweep:
 
 ```bash
