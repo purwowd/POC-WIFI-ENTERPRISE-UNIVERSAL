@@ -41,8 +41,5 @@ eap {
 	# an AuC/HLR/HSS backend; this PoC starts with static test vectors.
 	sim {
 	}
-
-	aka {
-	}
 }
 
