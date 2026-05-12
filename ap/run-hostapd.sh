@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
-CONF=/etc/hostapd/hostapd.conf
+SRC_CONF=/etc/hostapd/hostapd.conf
+CONF=/tmp/hostapd.conf
+
+cp "$SRC_CONF" "$CONF"
 
 if [ -n "${RADIUS_ADDR:-}" ]; then
   sed -i "s/^auth_server_addr=.*/auth_server_addr=${RADIUS_ADDR}/" "$CONF" || true

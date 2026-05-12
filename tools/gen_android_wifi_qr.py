@@ -2,8 +2,12 @@
 """
 gen_android_wifi_qr.py
 
-Generate an Android-friendly "WiFi QR" payload string for WPA2-Enterprise (802.1X)
-and optionally render it as a QR PNG.
+Generate an Android-friendly "WiFi QR" payload string for WPA2-Enterprise
+(802.1X) PEAP/TTLS lab fallback and optionally render it as a QR PNG.
+
+This is not a Passpoint/EAP-SIM provisioning mechanism. Android EAP-SIM
+usually needs carrier profile, MDM, Passpoint provisioning, OEM API, or
+another managed credential path.
 
 Output format (commonly supported on Android 10+; vendor-dependent):
   WIFI:T:WPA2-EAP;S:<ssid>;E:<eap>;PH2:<phase2>;A:<anon>;I:<identity>;H:false;
@@ -84,7 +88,7 @@ def render_png(payload: str, out_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Generate Android WPA2-Enterprise WiFi QR payload."
+        description="Generate Android WPA2-Enterprise PEAP/TTLS WiFi QR payload."
     )
     p.add_argument("--ssid", required=True, help="WiFi SSID")
     p.add_argument(
@@ -126,6 +130,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    if args.eap.upper() in {"SIM", "AKA", "AKA'"}:
+        raise SystemExit(
+            "Android WiFi QR is not a reliable Passpoint/EAP-SIM provisioning "
+            "path. Use a Passpoint/MDM/carrier profile for EAP-SIM."
+        )
 
     qr = WifiEnterpriseQr(
         ssid=args.ssid,

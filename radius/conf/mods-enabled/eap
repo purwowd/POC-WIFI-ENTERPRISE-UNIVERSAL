@@ -1,5 +1,5 @@
 eap {
-	default_eap_type = peap
+	default_eap_type = sim
 	timer_expire     = 60
 	ignore_unknown_eap_types = no
 	cisco_accounting_username_bug = no
@@ -35,6 +35,14 @@ eap {
 	}
 
 	mschapv2 {
+	}
+
+	# EAP-SIM / EAP-AKA lab methods. Real deployments need vectors from
+	# an AuC/HLR/HSS backend; this PoC starts with static test vectors.
+	sim {
+	}
+
+	aka {
 	}
 }
 

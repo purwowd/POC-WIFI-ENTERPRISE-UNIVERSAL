@@ -11,7 +11,7 @@ services:
       - ./evidence:/evidence
     environment:
       - RADIUS_CLIENT_SECRET=labsecret
-      - RADIUS_EAP_DEFAULT=peap
+      - RADIUS_EAP_DEFAULT=sim
     command: ["/entrypoint.sh"]
     restart: unless-stopped
 
@@ -34,6 +34,8 @@ services:
   victim:
     build: ./victim
     container_name: poc-wifi-victim
+    profiles:
+      - docker-victim
     networks:
       wlanlab:
         ipv4_address: 10.88.0.20
@@ -45,11 +47,13 @@ services:
       - ./radius/certs:/certs:ro
       - ./evidence:/evidence
     environment:
-      - WIFI_SSID=LAB-ENTERPRISE
-      - WIFI_USER=testuser
-      - WIFI_PASS=testpass123
-      - EAP_METHOD=PEAP
-      - PHASE2=auth=MSCHAPV2
+      - WIFI_SSID=LAB-HS20
+      - WIFI_USER=1510100000000000
+      - WIFI_PASS=
+      - EAP_METHOD=SIM
+      - PHASE2=
+      - LAB_REALM=wlan.mnc010.mcc510.3gppnetwork.org
+      - SIM_PIN=
       - CA_CERT=/certs/ca.crt
     command: ["/run-victim.sh"]
     restart: "no"
