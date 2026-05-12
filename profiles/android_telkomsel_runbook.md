@@ -45,6 +45,18 @@ python3 poc.py --mode capture --interface wlan1 --sudo --capture-seconds 120 \
   --output evidence/telkomsel-capture.json
 ```
 
+Aggressive SIM-only probe:
+
+```bash
+python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 180 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/telkomsel-sim-only-probe.json
+```
+
+This mode intentionally has no PEAP/TTLS fallback in FreeRADIUS. A non-matching phone should produce no identity, EAP-NAK, timeout, or Access-Reject.
+
 The runner also stores AP/RADIUS logs and reports detected EAP-SIM identity
 material in JSON:
 

@@ -179,6 +179,18 @@ python3 poc.py --mode full --interface wlan1 --sudo --capture-seconds 120 \
   --output evidence/telkomsel-full.json
 ```
 
+Mode agresif SIM-only probe:
+
+```bash
+python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 180 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/telkomsel-sim-only-probe.json
+```
+
+Mode ini tidak menyediakan fallback PEAP/TTLS di FreeRADIUS. Kalau HP tidak punya/memakai SIM/AKA carrier profile, hasilnya harus gagal jelas sebagai no identity, EAP-NAK, timeout, atau Access-Reject.
+
 `poc.py` juga menyimpan capture WiFi-interface, EAPOL, RADIUS, dan `docker compose logs radius ap` ke `evidence/`, lalu mencoba mendeteksi identity EAP-SIM/AKA:
 
 - `permanent_eap_sim_identity`: value berupa `1 + IMSI`, contoh pola Telkomsel `151010...`.

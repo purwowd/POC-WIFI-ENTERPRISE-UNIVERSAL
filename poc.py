@@ -49,6 +49,12 @@ class IdentityFinding:
 
 
 @dataclass
+class EapFinding:
+    kind: str
+    detail: str
+
+
+@dataclass
 class PocResult:
     mode: str
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -56,6 +62,7 @@ class PocResult:
     commands: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     identities: list[IdentityFinding] = field(default_factory=list)
+    eap_findings: list[EapFinding] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     success: bool = False
 
@@ -156,6 +163,23 @@ def detect_identities(text: str, *, redact: bool = True) -> list[IdentityFinding
     return findings
 
 
+def detect_eap_findings(text: str) -> list[EapFinding]:
+    patterns = {
+        "access_request": r"Received Access-Request|Access-Request",
+        "access_reject": r"Access-Reject|Sent Access-Reject",
+        "access_accept": r"Access-Accept|Sent Access-Accept",
+        "eap_identity": r"EAP-Identity|Identity reply|EAP Response.*Identity",
+        "eap_sim": r"rlm_eap_sim|EAP-SIM|default_eap_type = \"sim\"",
+        "eap_nak": r"EAP-NAK|Nak|NAK|No mutually acceptable",
+        "radius_timeout": r"retransWhile --> 0|timeout|No response from RADIUS",
+    }
+    findings: list[EapFinding] = []
+    for kind, pattern in patterns.items():
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            findings.append(EapFinding(kind=kind, detail=f"matched /{pattern}/i"))
+    return findings
+
+
 def check_environment(interface: str) -> PocResult:
     result = PocResult(mode="check")
     conf = read_hostapd_conf()
@@ -216,7 +240,7 @@ def check_environment(interface: str) -> PocResult:
 
 
 def require_confirmations(args: argparse.Namespace) -> None:
-    if args.mode in {"start", "full"}:
+    if args.mode in {"start", "full", "sim-only-probe"}:
         if not args.confirm_real_phone_lab:
             raise SystemExit("--confirm-real-phone-lab is required for modes that start the AP.")
         if not args.confirm_rf_lab:
@@ -351,6 +375,7 @@ def capture_evidence(args: argparse.Namespace, result: PocResult) -> None:
     result.identities.extend(
         detect_identities(logs.stdout, redact=not args.no_redact_identities)
     )
+    result.eap_findings.extend(detect_eap_findings(logs.stdout))
     if result.identities:
         result.notes.append(
             "Identity material observed in logs. Raw pcaps/logs may contain the full value."
@@ -358,6 +383,10 @@ def capture_evidence(args: argparse.Namespace, result: PocResult) -> None:
     else:
         result.notes.append(
             "No Telkomsel IMSI/permanent identity found in AP/RADIUS logs; device may have used anonymous/pseudonym identity or did not attempt EAP-SIM."
+        )
+    if not any(f.kind == "access_request" for f in result.eap_findings):
+        result.notes.append(
+            "No RADIUS Access-Request observed; phone likely stopped at ANQP/scan or did not associate."
         )
 
     note_path.write_text(result.to_json() + "\n", encoding="utf-8")
@@ -371,7 +400,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["check", "start", "capture", "full", "stop", "provision-android"],
+        choices=[
+            "check",
+            "start",
+            "capture",
+            "full",
+            "sim-only-probe",
+            "stop",
+            "provision-android",
+        ],
         default="check",
         help="check is default and does not start the AP.",
     )
@@ -404,6 +441,12 @@ def main() -> int:
         elif args.mode == "capture":
             capture_evidence(args, result)
         elif args.mode == "full":
+            start_hotspot(result)
+            capture_evidence(args, result)
+        elif args.mode == "sim-only-probe":
+            result.notes.append(
+                "SIM-only probe: RADIUS is configured without PEAP/TTLS fallback."
+            )
             start_hotspot(result)
             capture_evidence(args, result)
         elif args.mode == "stop":

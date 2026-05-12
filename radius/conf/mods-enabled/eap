@@ -5,40 +5,9 @@ eap {
 	cisco_accounting_username_bug = no
 	max_sessions = ${max_requests}
 
-	tls-config tls-common {
-		private_key_password = whatever
-		private_key_file = /certs/server.key
-		certificate_file = /certs/server.crt
-		ca_file = /certs/ca.crt
-		dh_file = ${certdir}/dh
-		random_file = ${certdir}/random
-		fragment_size = 1024
-		include_length = yes
-		auto_chain = yes
-		# check_crl = yes
-	}
-
-	peap {
-		tls = tls-common
-		virtual_server = "inner-tunnel"
-		default_eap_type = mschapv2
-		copy_request_to_tunnel = yes
-		use_tunneled_reply = yes
-	}
-
-	ttls {
-		tls = tls-common
-		virtual_server = "inner-tunnel"
-		default_eap_type = pap
-		copy_request_to_tunnel = yes
-		use_tunneled_reply = yes
-	}
-
-	mschapv2 {
-	}
-
-	# EAP-SIM / EAP-AKA lab methods. Real deployments need vectors from
-	# an AuC/HLR/HSS backend; this PoC starts with static test vectors.
+	# SIM-only probe mode. Do not load PEAP/TTLS/MSCHAPv2 here; if Android
+	# cannot use SIM credentials, the run should fail clearly instead of
+	# falling back to the manual PEAP UI path.
 	sim {
 	}
 }
