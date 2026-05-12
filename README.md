@@ -227,6 +227,12 @@ Output utama:
 - `evidence/sweep-summary.json`: summary yang juga ditulis oleh runner.
 - `sweep_results[]`: per-profile identity count, EAP findings, dan evidence path.
 
+Catatan: sweep sekarang menulis `sweep-summary.json` setelah setiap profile dan **membiarkan AP/RADIUS tetap running** dengan `--final-hs20-profile telkomsel-optimized` secara default. Kalau ingin stop setelah sweep:
+
+```bash
+python3 poc.py --mode sweep --stop-after-sweep ...
+```
+
 Interpretasi kuat:
 
 - Positive profile menghasilkan `identity_count > 0`.

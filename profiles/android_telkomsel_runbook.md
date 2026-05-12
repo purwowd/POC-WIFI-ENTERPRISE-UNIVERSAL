@@ -83,7 +83,9 @@ python3 poc.py --mode sweep \
 ```
 
 The sweep recreates AP/RADIUS for each profile and writes `sweep_results[]`
-with identity counts and EAP findings per profile.
+with identity counts and EAP findings per profile. It writes
+`evidence/sweep-summary.json` after each profile and keeps AP/RADIUS running
+with `telkomsel-optimized` at the end unless `--stop-after-sweep` is set.
 
 The runner also stores AP/RADIUS logs and reports detected EAP-SIM identity
 material in JSON:

@@ -537,9 +537,10 @@ def parse_sweep_profiles(value: str) -> list[str]:
 def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
     profiles = parse_sweep_profiles(args.sweep_profiles)
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    summary_path = EVIDENCE_DIR / "sweep-summary.json"
     result.notes.append(
-        "Sweep mode: each profile is applied, AP/RADIUS are recreated, "
-        "then evidence is captured."
+        "Sweep mode: each profile is applied, AP/RADIUS are recreated as needed, "
+        "then evidence is captured. Summary is written after each profile."
     )
 
     for profile_name in profiles:
@@ -557,11 +558,6 @@ def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
         except Exception as exc:
             run_result.success = False
             run_result.notes.append(f"error: {exc}")
-        finally:
-            try:
-                stop_hotspot(run_result)
-            except Exception as exc:
-                run_result.notes.append(f"stop error: {exc}")
 
         result.commands.extend(run_result.commands)
         result.evidence.extend(run_result.evidence)
@@ -578,6 +574,7 @@ def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
                 success=run_result.success,
             )
         )
+        summary_path.write_text(result.to_json() + "\n", encoding="utf-8")
 
     positive_hits = [
         item.profile
@@ -604,9 +601,19 @@ def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
         result.notes.append("Negative controls did not expose identity.")
         result.success = bool(positive_hits)
 
-    summary_path = EVIDENCE_DIR / "sweep-summary.json"
     summary_path.write_text(result.to_json() + "\n", encoding="utf-8")
     result.evidence.append(str(summary_path.relative_to(POC_ROOT)))
+
+    if args.stop_after_sweep:
+        stop_hotspot(result)
+    else:
+        args.hs20_profile = args.final_hs20_profile
+        prepare_hs20_profile(args, result)
+        start_hotspot(result)
+        result.notes.append(
+            f"Kept AP/RADIUS running with final profile: {args.final_hs20_profile}"
+        )
+        summary_path.write_text(result.to_json() + "\n", encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -651,6 +658,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help="Seconds to wait after recreating AP/RADIUS before each sweep capture.",
+    )
+    parser.add_argument(
+        "--final-hs20-profile",
+        choices=sorted(HS20_PROFILES),
+        default="telkomsel-optimized",
+        help="Profile to leave running after --mode sweep.",
+    )
+    parser.add_argument(
+        "--stop-after-sweep",
+        action="store_true",
+        help="Stop AP/RADIUS after sweep. Default leaves final profile running.",
     )
     parser.add_argument("--sudo", action="store_true", help="Run tcpdump through sudo.")
     parser.add_argument("--down", action="store_true", help="Use docker compose down in stop mode.")
