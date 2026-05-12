@@ -55,14 +55,83 @@ class EapFinding:
 
 
 @dataclass
+class SweepRun:
+    profile: str
+    expected_identity: bool
+    identity_count: int
+    eap_finding_kinds: list[str]
+    evidence: list[str]
+    notes: list[str]
+    success: bool
+
+
+@dataclass(frozen=True)
+class Hs20Profile:
+    friendly_name: str
+    domains: list[str]
+    plmn: str
+    nai_realms: list[str]
+    description: str
+    expected_identity: bool
+
+
+HS20_PROFILES: dict[str, Hs20Profile] = {
+    "telkomsel-optimized": Hs20Profile(
+        friendly_name="Telkomsel Lab",
+        domains=[
+            "wlan.mnc010.mcc510.3gppnetwork.org",
+            "mnc010.mcc510.3gppnetwork.org",
+        ],
+        plmn="510,10",
+        nai_realms=[
+            "0,wlan.mnc010.mcc510.3gppnetwork.org,18[5:6],23[5:7],50[5:7]",
+            "0,mnc010.mcc510.3gppnetwork.org,18[5:6],23[5:7],50[5:7]",
+        ],
+        description="Best-effort Telkomsel carrier match: SIM + AKA + AKA'.",
+        expected_identity=True,
+    ),
+    "telkomsel-wlan-only": Hs20Profile(
+        friendly_name="Telkomsel Lab",
+        domains=["wlan.mnc010.mcc510.3gppnetwork.org"],
+        plmn="510,10",
+        nai_realms=[
+            "0,wlan.mnc010.mcc510.3gppnetwork.org,18[5:6],23[5:7],50[5:7]",
+        ],
+        description="Only the WLAN 3GPP realm; useful to test exact profile matching.",
+        expected_identity=True,
+    ),
+    "telkomsel-sim-only": Hs20Profile(
+        friendly_name="Telkomsel Lab",
+        domains=["wlan.mnc010.mcc510.3gppnetwork.org"],
+        plmn="510,10",
+        nai_realms=[
+            "0,wlan.mnc010.mcc510.3gppnetwork.org,18[5:6]",
+        ],
+        description="Advertise EAP-SIM only; useful when AKA advertisements change behavior.",
+        expected_identity=True,
+    ),
+    "negative-control": Hs20Profile(
+        friendly_name="Negative Control Lab",
+        domains=["lab.invalid"],
+        plmn="001,01",
+        nai_realms=["0,lab.invalid,18[5:6]"],
+        description="Non-matching realm/PLMN. IMSI/EAP identity should not appear.",
+        expected_identity=False,
+    ),
+}
+
+
+@dataclass
 class PocResult:
     mode: str
+    hs20_profile: str = "telkomsel-optimized"
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     checks: list[CheckResult] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     identities: list[IdentityFinding] = field(default_factory=list)
     eap_findings: list[EapFinding] = field(default_factory=list)
+    sweep_results: list[SweepRun] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     success: bool = False
 
@@ -112,6 +181,45 @@ def read_hostapd_conf() -> dict[str, str]:
         else:
             values[key] = value
     return values
+
+
+def apply_hs20_profile(profile_name: str) -> str:
+    profile = HS20_PROFILES[profile_name]
+    raw_lines = HOSTAPD_CONF.read_text(encoding="utf-8").splitlines()
+    managed_keys = {
+        "domain_name",
+        "anqp_3gpp_cell_net",
+        "nai_realm",
+        "hs20_oper_friendly_name",
+    }
+
+    block = [
+        "",
+        f"# Active HS2.0 profile: {profile_name}",
+        f"# {profile.description}",
+        f"domain_name={','.join(profile.domains)}",
+        f"anqp_3gpp_cell_net={profile.plmn}",
+    ]
+    block.extend(f"nai_realm={realm}" for realm in profile.nai_realms)
+    block.append(f"hs20_oper_friendly_name=eng:{profile.friendly_name}")
+
+    output: list[str] = []
+    inserted = False
+    for raw_line in raw_lines:
+        stripped = raw_line.strip()
+        key = stripped.split("=", 1)[0] if "=" in stripped else ""
+        if key in managed_keys:
+            continue
+        if not inserted and stripped == "hs20=1":
+            output.extend(block)
+            inserted = True
+        output.append(raw_line)
+
+    if not inserted:
+        output.extend(block)
+
+    HOSTAPD_CONF.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+    return profile.description
 
 
 def mask_identity(value: str) -> str:
@@ -193,12 +301,12 @@ def check_environment(interface: str) -> PocResult:
     )
     result.add_check(
         "telkomsel_plmn",
-        conf.get("anqp_3gpp_cell_net") == TELKOMSEL_PLMN,
+        conf.get("anqp_3gpp_cell_net") in {TELKOMSEL_PLMN, "001,01"},
         f"configured={conf.get('anqp_3gpp_cell_net', '<missing>')}",
     )
     result.add_check(
-        "telkomsel_realm",
-        TELKOMSEL_REALM in conf.get("domain_name", "") and TELKOMSEL_REALM in conf.get("nai_realm", ""),
+        "hs20_realm_present",
+        bool(conf.get("domain_name")) and bool(conf.get("nai_realm")),
         f"domain={conf.get('domain_name', '<missing>')} nai_realm={conf.get('nai_realm', '<missing>')}",
     )
     result.add_check(
@@ -240,7 +348,7 @@ def check_environment(interface: str) -> PocResult:
 
 
 def require_confirmations(args: argparse.Namespace) -> None:
-    if args.mode in {"start", "full", "sim-only-probe"}:
+    if args.mode in {"start", "full", "sim-only-probe", "sweep"}:
         if not args.confirm_real_phone_lab:
             raise SystemExit("--confirm-real-phone-lab is required for modes that start the AP.")
         if not args.confirm_rf_lab:
@@ -248,13 +356,35 @@ def require_confirmations(args: argparse.Namespace) -> None:
 
 
 def start_hotspot(result: PocResult) -> None:
-    argv = ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "--build", "radius", "ap"]
+    argv = [
+        "docker",
+        "compose",
+        "-f",
+        str(COMPOSE_FILE),
+        "up",
+        "-d",
+        "--build",
+        "--force-recreate",
+        "radius",
+        "ap",
+    ]
     result.commands.append(command_string(argv))
     proc = run_command(argv, timeout=180)
     result.add_check("start_radius_ap", proc.returncode == 0, proc.stdout.strip()[-1000:])
     if proc.returncode != 0:
         raise RuntimeError(proc.stdout)
     result.notes.append("AP/RADIUS started. Use 'docker compose logs -f radius ap' to watch authentication attempts.")
+
+
+def prepare_hs20_profile(args: argparse.Namespace, result: PocResult) -> None:
+    description = apply_hs20_profile(args.hs20_profile)
+    profile = HS20_PROFILES[args.hs20_profile]
+    result.hs20_profile = args.hs20_profile
+    result.notes.append(f"Applied HS2.0 profile {args.hs20_profile}: {description}")
+    if profile.expected_identity:
+        result.notes.append("Expected result: saved carrier profile may send EAP identity.")
+    else:
+        result.notes.append("Expected result: negative control should not send EAP identity.")
 
 
 def stop_hotspot(result: PocResult, *, down: bool = False) -> None:
@@ -393,6 +523,92 @@ def capture_evidence(args: argparse.Namespace, result: PocResult) -> None:
     result.evidence.append(str(note_path.relative_to(POC_ROOT)))
 
 
+def parse_sweep_profiles(value: str) -> list[str]:
+    profiles = [item.strip() for item in value.split(",") if item.strip()]
+    unknown = [profile for profile in profiles if profile not in HS20_PROFILES]
+    if unknown:
+        raise SystemExit(
+            f"Unknown --sweep-profiles entries: {', '.join(unknown)}. "
+            f"Valid profiles: {', '.join(sorted(HS20_PROFILES))}"
+        )
+    return profiles
+
+
+def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
+    profiles = parse_sweep_profiles(args.sweep_profiles)
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    result.notes.append(
+        "Sweep mode: each profile is applied, AP/RADIUS are recreated, "
+        "then evidence is captured."
+    )
+
+    for profile_name in profiles:
+        args.hs20_profile = profile_name
+        profile = HS20_PROFILES[profile_name]
+        run_result = PocResult(mode="sim-only-probe", hs20_profile=profile_name)
+        run_result.notes.append(f"Sweep profile: {profile.description}")
+
+        try:
+            prepare_hs20_profile(args, run_result)
+            start_hotspot(run_result)
+            time.sleep(args.sweep_settle_seconds)
+            capture_evidence(args, run_result)
+            run_result.success = all(check.ok for check in run_result.checks)
+        except Exception as exc:
+            run_result.success = False
+            run_result.notes.append(f"error: {exc}")
+        finally:
+            try:
+                stop_hotspot(run_result)
+            except Exception as exc:
+                run_result.notes.append(f"stop error: {exc}")
+
+        result.commands.extend(run_result.commands)
+        result.evidence.extend(run_result.evidence)
+        result.identities.extend(run_result.identities)
+        result.eap_findings.extend(run_result.eap_findings)
+        result.sweep_results.append(
+            SweepRun(
+                profile=profile_name,
+                expected_identity=profile.expected_identity,
+                identity_count=len(run_result.identities),
+                eap_finding_kinds=sorted({item.kind for item in run_result.eap_findings}),
+                evidence=run_result.evidence,
+                notes=run_result.notes,
+                success=run_result.success,
+            )
+        )
+
+    positive_hits = [
+        item.profile
+        for item in result.sweep_results
+        if item.expected_identity and item.identity_count > 0
+    ]
+    negative_hits = [
+        item.profile
+        for item in result.sweep_results
+        if not item.expected_identity and item.identity_count > 0
+    ]
+
+    if positive_hits:
+        result.notes.append(f"Positive identity trigger observed: {', '.join(positive_hits)}")
+    else:
+        result.notes.append("No identity observed in positive profiles.")
+
+    if negative_hits:
+        result.notes.append(
+            f"Unexpected identity in negative control: {', '.join(negative_hits)}"
+        )
+        result.success = False
+    else:
+        result.notes.append("Negative controls did not expose identity.")
+        result.success = bool(positive_hits)
+
+    summary_path = EVIDENCE_DIR / "sweep-summary.json"
+    summary_path.write_text(result.to_json() + "\n", encoding="utf-8")
+    result.evidence.append(str(summary_path.relative_to(POC_ROOT)))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Telkomsel HS2.0/EAP-SIM real-phone lab PoC.",
@@ -406,6 +622,7 @@ def parse_args() -> argparse.Namespace:
             "capture",
             "full",
             "sim-only-probe",
+            "sweep",
             "stop",
             "provision-android",
         ],
@@ -415,6 +632,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interface", default="wlan1", help="WiFi AP interface used by hostapd/tcpdump.")
     parser.add_argument("--radius-capture-interface", default="any", help="Interface for RADIUS tcpdump capture.")
     parser.add_argument("--capture-seconds", type=int, default=90, help="Evidence capture duration.")
+    parser.add_argument(
+        "--hs20-profile",
+        choices=sorted(HS20_PROFILES),
+        default="telkomsel-optimized",
+        help="HS2.0 metadata profile to write before starting the AP.",
+    )
+    parser.add_argument(
+        "--sweep-profiles",
+        default=(
+            "telkomsel-optimized,telkomsel-wlan-only,"
+            "telkomsel-sim-only,negative-control"
+        ),
+        help="Comma-separated HS2.0 profiles for --mode sweep.",
+    )
+    parser.add_argument(
+        "--sweep-settle-seconds",
+        type=int,
+        default=8,
+        help="Seconds to wait after recreating AP/RADIUS before each sweep capture.",
+    )
     parser.add_argument("--sudo", action="store_true", help="Run tcpdump through sudo.")
     parser.add_argument("--down", action="store_true", help="Use docker compose down in stop mode.")
     parser.add_argument("--output", type=Path, default=None, help="Write JSON result to this file.")
@@ -434,27 +671,34 @@ def main() -> int:
 
     result = check_environment(args.interface)
     result.mode = args.mode
+    result.hs20_profile = args.hs20_profile
 
     try:
         if args.mode == "start":
+            prepare_hs20_profile(args, result)
             start_hotspot(result)
         elif args.mode == "capture":
             capture_evidence(args, result)
         elif args.mode == "full":
+            prepare_hs20_profile(args, result)
             start_hotspot(result)
             capture_evidence(args, result)
         elif args.mode == "sim-only-probe":
             result.notes.append(
                 "SIM-only probe: RADIUS is configured without PEAP/TTLS fallback."
             )
+            prepare_hs20_profile(args, result)
             start_hotspot(result)
             capture_evidence(args, result)
+        elif args.mode == "sweep":
+            run_sweep(args, result)
         elif args.mode == "stop":
             stop_hotspot(result, down=args.down)
         elif args.mode == "provision-android":
             provision_android_metadata(result)
 
-        result.success = all(check.ok for check in result.checks)
+        if args.mode != "sweep":
+            result.success = all(check.ok for check in result.checks)
     except Exception as exc:
         result.success = False
         result.notes.append(f"error: {exc}")

@@ -182,7 +182,8 @@ python3 poc.py --mode full --interface wlan1 --sudo --capture-seconds 120 \
 Mode agresif SIM-only probe:
 
 ```bash
-python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 180 \
+python3 poc.py --mode sim-only-probe --hs20-profile telkomsel-optimized \
+  --interface wlan1 --sudo --capture-seconds 180 \
   --confirm-real-phone-lab \
   --confirm-rf-lab \
   --no-redact-identities \
@@ -190,6 +191,47 @@ python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 
 ```
 
 Mode ini tidak menyediakan fallback PEAP/TTLS di FreeRADIUS. Kalau HP tidak punya/memakai SIM/AKA carrier profile, hasilnya harus gagal jelas sebagai no identity, EAP-NAK, timeout, atau Access-Reject.
+
+Negative control untuk membuktikan bahwa trigger berasal dari realm/PLMN match, bukan SSID/probe biasa:
+
+```bash
+python3 poc.py --mode sim-only-probe --hs20-profile negative-control \
+  --interface wlan1 --sudo --capture-seconds 120 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/negative-control-sim-only-probe.json
+```
+
+Profile yang tersedia:
+
+- `telkomsel-optimized`: realm `wlan.mnc010...` + `mnc010...`, PLMN `510/10`, SIM/AKA/AKA'.
+- `telkomsel-wlan-only`: hanya realm `wlan.mnc010...`.
+- `telkomsel-sim-only`: hanya EAP-SIM, tanpa AKA/AKA'.
+- `negative-control`: realm `lab.invalid`, PLMN test `001/01`; seharusnya tidak memicu EAP identity Telkomsel.
+
+Sweep otomatis semua profile:
+
+```bash
+python3 poc.py --mode sweep \
+  --interface wlan1 --sudo --capture-seconds 90 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/sweep-result.json
+```
+
+Output utama:
+
+- `evidence/sweep-result.json`: hasil keseluruhan.
+- `evidence/sweep-summary.json`: summary yang juga ditulis oleh runner.
+- `sweep_results[]`: per-profile identity count, EAP findings, dan evidence path.
+
+Interpretasi kuat:
+
+- Positive profile menghasilkan `identity_count > 0`.
+- `negative-control` menghasilkan `identity_count = 0`.
+- Jika keduanya benar, IMSI/identity dipicu oleh metadata realm/PLMN yang match, bukan oleh SSID/probe request generik.
 
 `poc.py` juga menyimpan capture WiFi-interface, EAPOL, RADIUS, dan `docker compose logs radius ap` ke `evidence/`, lalu mencoba mendeteksi identity EAP-SIM/AKA:
 

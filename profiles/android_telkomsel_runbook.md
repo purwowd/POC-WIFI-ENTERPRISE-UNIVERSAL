@@ -48,7 +48,8 @@ python3 poc.py --mode capture --interface wlan1 --sudo --capture-seconds 120 \
 Aggressive SIM-only probe:
 
 ```bash
-python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 180 \
+python3 poc.py --mode sim-only-probe --hs20-profile telkomsel-optimized \
+  --interface wlan1 --sudo --capture-seconds 180 \
   --confirm-real-phone-lab \
   --confirm-rf-lab \
   --no-redact-identities \
@@ -56,6 +57,33 @@ python3 poc.py --mode sim-only-probe --interface wlan1 --sudo --capture-seconds 
 ```
 
 This mode intentionally has no PEAP/TTLS fallback in FreeRADIUS. A non-matching phone should produce no identity, EAP-NAK, timeout, or Access-Reject.
+
+Run a negative control after the positive trigger:
+
+```bash
+python3 poc.py --mode sim-only-probe --hs20-profile negative-control \
+  --interface wlan1 --sudo --capture-seconds 120 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/negative-control-sim-only-probe.json
+```
+
+Expected: `telkomsel-optimized` may produce `permanent_eap_sim_identity`; `negative-control` should not.
+
+Or run the full profile sweep:
+
+```bash
+python3 poc.py --mode sweep \
+  --interface wlan1 --sudo --capture-seconds 90 \
+  --confirm-real-phone-lab \
+  --confirm-rf-lab \
+  --no-redact-identities \
+  --output evidence/sweep-result.json
+```
+
+The sweep recreates AP/RADIUS for each profile and writes `sweep_results[]`
+with identity counts and EAP findings per profile.
 
 The runner also stores AP/RADIUS logs and reports detected EAP-SIM identity
 material in JSON:
