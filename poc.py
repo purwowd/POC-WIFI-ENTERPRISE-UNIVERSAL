@@ -59,6 +59,8 @@ class SweepRun:
     profile: str
     expected_identity: bool
     identity_count: int
+    identities: list[IdentityFinding]
+    station_macs: list[str]
     eap_finding_kinds: list[str]
     evidence: list[str]
     notes: list[str]
@@ -286,6 +288,32 @@ def detect_eap_findings(text: str) -> list[EapFinding]:
         if re.search(pattern, text, flags=re.IGNORECASE):
             findings.append(EapFinding(kind=kind, detail=f"matched /{pattern}/i"))
     return findings
+
+
+def detect_station_macs(text: str) -> list[str]:
+    macs: set[str] = set()
+    patterns = [
+        r"\bSTA ([0-9a-fA-F:]{17})\b",
+        r"\bsa[ =]([0-9a-fA-F:]{17})\b",
+        r"\bA1=([0-9a-fA-F:]{17})\b",
+        r"\bA2=([0-9a-fA-F:]{17})\b",
+    ]
+    for pattern in patterns:
+        macs.update(match.lower() for match in re.findall(pattern, text))
+    return sorted(macs)
+
+
+def detect_station_macs_from_evidence(evidence_paths: list[str]) -> list[str]:
+    macs: set[str] = set()
+    for evidence_path in evidence_paths:
+        path = POC_ROOT / evidence_path
+        if not path.name.startswith("telkomsel-docker-logs-") or not path.exists():
+            continue
+        try:
+            macs.update(detect_station_macs(path.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            continue
+    return sorted(macs)
 
 
 def check_environment(interface: str) -> PocResult:
@@ -568,6 +596,8 @@ def run_sweep(args: argparse.Namespace, result: PocResult) -> None:
                 profile=profile_name,
                 expected_identity=profile.expected_identity,
                 identity_count=len(run_result.identities),
+                identities=run_result.identities,
+                station_macs=detect_station_macs_from_evidence(run_result.evidence),
                 eap_finding_kinds=sorted({item.kind for item in run_result.eap_findings}),
                 evidence=run_result.evidence,
                 notes=run_result.notes,
