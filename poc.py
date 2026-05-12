@@ -31,6 +31,7 @@ HOSTAPD_CONF = POC_ROOT / "configs" / "hostapd.conf"
 EVIDENCE_DIR = POC_ROOT / "evidence"
 TELKOMSEL_REALM = "wlan.mnc010.mcc510.3gppnetwork.org"
 TELKOMSEL_PLMN = "510,10"
+TELKOMSEL_MCCMNC = "51010"
 
 
 @dataclass
@@ -97,7 +98,12 @@ def read_hostapd_conf() -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
+        key = key.strip()
+        value = value.strip()
+        if key in values:
+            values[key] = f"{values[key]}\n{value}"
+        else:
+            values[key] = value
     return values
 
 
@@ -168,12 +174,12 @@ def check_environment(interface: str) -> PocResult:
     )
     result.add_check(
         "telkomsel_realm",
-        conf.get("domain_name") == TELKOMSEL_REALM and TELKOMSEL_REALM in conf.get("nai_realm", ""),
+        TELKOMSEL_REALM in conf.get("domain_name", "") and TELKOMSEL_REALM in conf.get("nai_realm", ""),
         f"domain={conf.get('domain_name', '<missing>')} nai_realm={conf.get('nai_realm', '<missing>')}",
     )
     result.add_check(
-        "eap_sim_advertised",
-        "5[5:6]" in conf.get("nai_realm", ""),
+        "eap_sim_aka_advertised",
+        all(marker in conf.get("nai_realm", "") for marker in ["18[5:6]", "23[5:7]", "50[5:7]"]),
         f"nai_realm={conf.get('nai_realm', '<missing>')}",
     )
 
@@ -238,9 +244,37 @@ def stop_hotspot(result: PocResult, *, down: bool = False) -> None:
         raise RuntimeError(proc.stdout)
 
 
+def provision_android_metadata(result: PocResult) -> None:
+    profile_path = POC_ROOT / "profiles" / "android_passpoint_telkomsel.json"
+    payload = {
+        "fqdn": TELKOMSEL_REALM,
+        "friendly_name": "Telkomsel Lab",
+        "realm": TELKOMSEL_REALM,
+        "mccmnc": TELKOMSEL_MCCMNC,
+        "eap_method": "SIM",
+        "phase2_method": "NONE",
+        "expected_ssid": "LAB-HS20",
+        "install_paths": {
+            "carrier_privileged_app": "silent-capable",
+            "device_owner_mdm": "silent-capable on managed lab devices",
+            "system_privileged_app": "silent-capable on custom/OEM lab builds",
+        },
+        "notes": [
+            "The AP cannot force SIM credential selection.",
+            "Silent EAP-SIM provisioning requires Android-side privileges.",
+            "No user-interaction/no-root target means carrier-privileged, device-owner/MDM, or system-privileged only.",
+            "Do not store real IMSI/Ki/OPc/authentication vectors here.",
+        ],
+    }
+    profile_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    result.evidence.append(str(profile_path.relative_to(POC_ROOT)))
+    result.notes.append("Generated Android Passpoint provisioning metadata.")
+
+
 def capture_evidence(args: argparse.Namespace, result: PocResult) -> None:
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    wifi_pcap = EVIDENCE_DIR / f"telkomsel-wifi-{timestamp}.pcapng"
     eapol_pcap = EVIDENCE_DIR / f"telkomsel-eapol-{timestamp}.pcapng"
     radius_pcap = EVIDENCE_DIR / f"telkomsel-radius-{timestamp}.pcapng"
     docker_log = EVIDENCE_DIR / f"telkomsel-docker-logs-{timestamp}.log"
@@ -248,6 +282,11 @@ def capture_evidence(args: argparse.Namespace, result: PocResult) -> None:
 
     sudo_prefix = ["sudo"] if args.sudo else []
     captures = [
+        (
+            "wifi_ap_interface",
+            [*sudo_prefix, "tcpdump", "-i", args.interface, "-w", str(wifi_pcap)],
+            wifi_pcap,
+        ),
         (
             "eapol",
             [*sudo_prefix, "tcpdump", "-i", args.interface, "-w", str(eapol_pcap), "ether", "proto", "0x888e"],
@@ -332,7 +371,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["check", "start", "capture", "full", "stop"],
+        choices=["check", "start", "capture", "full", "stop", "provision-android"],
         default="check",
         help="check is default and does not start the AP.",
     )
@@ -369,6 +408,8 @@ def main() -> int:
             capture_evidence(args, result)
         elif args.mode == "stop":
             stop_hotspot(result, down=args.down)
+        elif args.mode == "provision-android":
+            provision_android_metadata(result)
 
         result.success = all(check.ok for check in result.checks)
     except Exception as exc:

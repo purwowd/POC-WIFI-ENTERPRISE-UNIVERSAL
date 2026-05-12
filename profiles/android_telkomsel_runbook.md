@@ -8,7 +8,7 @@ Use this when the victim/client is a real Android lab phone with a Telkomsel SIM
 - Operator friendly name: `Telkomsel Lab`
 - MCC/MNC: `510/10`
 - 3GPP realm: `wlan.mnc010.mcc510.3gppnetwork.org`
-- EAP method advertised: EAP-SIM
+- EAP methods advertised: EAP-SIM, EAP-AKA, EAP-AKA'
 
 These values help Android's carrier/Passpoint logic decide whether the AP is relevant. They do not authenticate the SIM by themselves.
 
@@ -38,7 +38,7 @@ tcpdump -i wlan1 -vvv ether proto 0x888e
 tcpdump -i any -vvv 'udp port 1812 or udp port 1813'
 ```
 
-Or let the PoC runner capture both streams:
+Or let the PoC runner capture WiFi-interface traffic, EAPOL, RADIUS, and AP/RADIUS logs:
 
 ```bash
 python3 poc.py --mode capture --interface wlan1 --sudo --capture-seconds 120 \
@@ -75,7 +75,16 @@ python3 poc.py --mode stop
 4. Let Android scan naturally for a few cycles.
 5. If the phone exposes Passpoint settings, ensure Passpoint/Hotspot 2.0 is enabled.
 
-Consumer Android builds may not let you manually create an EAP-SIM Passpoint profile. Many devices depend on carrier config, OEM APIs, MDM, or provisioning apps.
+Consumer Android builds may not let you manually create an EAP-SIM Passpoint profile. For this PoC, avoid manual UI and root paths; use carrier-privileged, device-owner/MDM, or system-privileged provisioning.
+
+For auto-install paths, see `profiles/android_passpoint_auto_install.md`.
+
+Generate the lab Passpoint metadata:
+
+```bash
+python3 poc.py --mode provision-android \
+  --output evidence/telkomsel-provisioning.json
+```
 
 ## Optional Android Logs
 
@@ -89,7 +98,7 @@ Useful signals:
 
 - ANQP query/response for `LAB-HS20`.
 - Carrier network matching for MCC/MNC `510/10`.
-- EAP method selection `SIM` or `AKA`.
+- EAP method selection `SIM`, `AKA`, or `AKA'`.
 - Connection attempt to `LAB-HS20`.
 - Failure reason before/after RADIUS exchange.
 

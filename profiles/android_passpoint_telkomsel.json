@@ -1,0 +1,20 @@
+{
+  "fqdn": "wlan.mnc010.mcc510.3gppnetwork.org",
+  "friendly_name": "Telkomsel Lab",
+  "realm": "wlan.mnc010.mcc510.3gppnetwork.org",
+  "mccmnc": "51010",
+  "eap_method": "SIM_AKA_AKA_PRIME_ADVERTISED_BY_AP",
+  "phase2_method": "NONE",
+  "expected_ssid": "LAB-HS20",
+  "notes": [
+    "AP cannot force SIM credential selection; Android must own/provision the Passpoint credential.",
+    "For EAP-SIM/EAP-AKA suggestions on modern Android, carrier-signed/privileged paths are the realistic silent path.",
+    "Normal app provisioning may require user approval and may be rejected for SIM-based enterprise suggestions.",
+    "Do not store real IMSI/Ki/OPc/authentication vectors in this profile."
+  ],
+  "android_install_paths": {
+    "carrier_privileged_app": "Silent-capable when APK signing certificate is authorized by the SIM/carrier privileges.",
+    "device_owner_mdm": "Silent-capable in managed-device lab flows if the MDM/device-owner has WiFi policy privileges.",
+    "system_privileged_app": "Silent-capable on custom ROM/OEM lab build with NETWORK_SETTINGS-like privileges."
+  }
+}

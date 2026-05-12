@@ -106,9 +106,9 @@ Pastikan ada `AP` di "Supported interface modes".
 - `ssid=LAB-HS20`
 - `channel=6`
 - `country_code=ID`
-- `domain_name=wlan.mnc010.mcc510.3gppnetwork.org`
+- `domain_name=wlan.mnc010.mcc510.3gppnetwork.org,mnc010.mcc510.3gppnetwork.org`
 - `anqp_3gpp_cell_net=510,10`
-- `nai_realm=...wlan.mnc010.mcc510.3gppnetwork.org...`
+- `nai_realm=...18[5:6],23[5:7],50[5:7]...`
 
 2. Kalau NetworkManager merebut interface AP:
 
@@ -147,6 +147,21 @@ docker compose logs -f radius ap
 - Aktifkan WiFi dan biarkan device scan SSID/Passpoint.
 - Jika Android tidak auto-select, itu biasanya karena carrier/Passpoint profile tidak mengizinkan manual EAP-SIM untuk SSID ini.
 - Runbook detail: `profiles/android_telkomsel_runbook.md`.
+- Auto-install Passpoint detail: `profiles/android_passpoint_auto_install.md`.
+
+Generate metadata provisioning Android. Untuk constraint **tanpa user interaction** dan **tanpa root**, gunakan jalur `device_owner_mdm`, `carrier_privileged_app`, atau `system_privileged_app`; jangan gunakan normal APK/manual WiFi UI.
+
+```bash
+python3 poc.py --mode provision-android \
+  --output evidence/telkomsel-provisioning.json
+```
+
+atau:
+
+```bash
+python3 tools/gen_android_passpoint_profile.py \
+  --out profiles/android_passpoint_telkomsel.json
+```
 
 6. Capture evidence saat HP mencoba scan/connect:
 
@@ -164,7 +179,7 @@ python3 poc.py --mode full --interface wlan1 --sudo --capture-seconds 120 \
   --output evidence/telkomsel-full.json
 ```
 
-`poc.py` juga menyimpan `docker compose logs radius ap` ke `evidence/telkomsel-docker-logs-*.log` dan mencoba mendeteksi identity EAP-SIM:
+`poc.py` juga menyimpan capture WiFi-interface, EAPOL, RADIUS, dan `docker compose logs radius ap` ke `evidence/`, lalu mencoba mendeteksi identity EAP-SIM/AKA:
 
 - `permanent_eap_sim_identity`: value berupa `1 + IMSI`, contoh pola Telkomsel `151010...`.
 - `anonymous_identity`: HP memakai outer identity anonim; IMSI tidak terlihat.
@@ -215,9 +230,10 @@ internet=1
 
 hs20=1
 hs20_oper_friendly_name=eng:Telkomsel Lab
-domain_name=wlan.mnc010.mcc510.3gppnetwork.org
+domain_name=wlan.mnc010.mcc510.3gppnetwork.org,mnc010.mcc510.3gppnetwork.org
 anqp_3gpp_cell_net=510,10
-nai_realm=0,wlan.mnc010.mcc510.3gppnetwork.org,5[5:6]
+nai_realm=0,wlan.mnc010.mcc510.3gppnetwork.org,18[5:6],23[5:7],50[5:7]
+nai_realm=0,mnc010.mcc510.3gppnetwork.org,18[5:6],23[5:7],50[5:7]
 ```
 
 `nai_realm` dan `anqp_3gpp_cell_net` harus match dengan profile client dan SIM/operator lab. Default PoC memakai PLMN Telkomsel `510/10`.
@@ -230,7 +246,7 @@ Untuk client auto EAP-SIM, profile harus punya:
 
 - SSID / Passpoint credential untuk `LAB-HS20`.
 - Credential type SIM/USIM.
-- EAP method SIM saja, atau AKA/AKA' sesuai lab.
+- EAP method SIM/AKA/AKA' sesuai carrier profile.
 - Realm `wlan.mnc010.mcc510.3gppnetwork.org`.
 - MCC/MNC `510/10` untuk Telkomsel.
 - Auto-join enabled.
